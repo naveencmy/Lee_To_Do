@@ -1,0 +1,14 @@
+# ═══════════════════════════════════════════════════════════════
+# Lee To-Do — Environment Variables (Backend Worker)
+# Copy this file to .dev.vars and fill in your values
+# NEVER commit .dev.vars to version control!
+# ═══════════════════════════════════════════════════════════════
+
+# VAPID Keys for Web Push Notifications
+# Generate with: node scripts/generate-vapid.js
+VAPID_PUBLIC_KEY=your_vapid_public_key_here
+VAPID_PRIVATE_KEY=your_vapid_private_key_here
+VAPID_SUBJECT=mailto:your-email@example.com
+
+# AI Gateway (optional - for routing through AI Gateway)
+AI_GATEWAY_SLUG=lee-todo-gateway

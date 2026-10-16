@@ -1,0 +1,21 @@
+{
+  "name": "lee-todo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI-Powered Cross-Platform Kanban To-Do Board",
+  "workspaces": ["client", "worker"],
+  "scripts": {
+    "dev:client": "cd client && npm run dev",
+    "dev:worker": "cd worker && npm run dev",
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:worker\"",
+    "build:client": "cd client && npm run build",
+    "deploy:worker": "cd worker && npx wrangler deploy",
+    "deploy:client": "cd client && npx wrangler pages deploy dist",
+    "db:init": "cd worker && npx wrangler d1 execute lee-todo-db --local --file=src/db/schema.sql",
+    "db:init:remote": "cd worker && npx wrangler d1 execute lee-todo-db --remote --file=src/db/schema.sql",
+    "generate:vapid": "node scripts/generate-vapid.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

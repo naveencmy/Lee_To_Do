@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#22d3ee"/>
+      <stop offset="100%" style="stop-color:#6366f1"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <!-- Kanban board icon -->
+  <rect x="80" y="120" width="100" height="280" rx="12" fill="rgba(255,255,255,0.25)"/>
+  <rect x="200" y="120" width="100" height="200" rx="12" fill="rgba(255,255,255,0.25)"/>
+  <rect x="320" y="120" width="100" height="240" rx="12" fill="rgba(255,255,255,0.25)"/>
+  <!-- Check marks -->
+  <path d="M110 180 L125 195 L155 165" stroke="white" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M230 180 L245 195 L275 165" stroke="white" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M350 180 L365 195 L395 165" stroke="white" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Task lines -->
+  <rect x="100" y="220" width="60" height="6" rx="3" fill="rgba(255,255,255,0.5)"/>
+  <rect x="100" y="240" width="40" height="6" rx="3" fill="rgba(255,255,255,0.3)"/>
+  <rect x="100" y="280" width="60" height="6" rx="3" fill="rgba(255,255,255,0.5)"/>
+  <rect x="100" y="300" width="45" height="6" rx="3" fill="rgba(255,255,255,0.3)"/>
+  <rect x="220" y="220" width="55" height="6" rx="3" fill="rgba(255,255,255,0.5)"/>
+  <rect x="220" y="240" width="35" height="6" rx="3" fill="rgba(255,255,255,0.3)"/>
+  <rect x="340" y="220" width="50" height="6" rx="3" fill="rgba(255,255,255,0.5)"/>
+  <rect x="340" y="240" width="40" height="6" rx="3" fill="rgba(255,255,255,0.3)"/>
+  <!-- AI sparkle -->
+  <circle cx="420" cy="100" r="28" fill="url(#accent)" opacity="0.9"/>
+  <text x="420" y="108" text-anchor="middle" font-size="28" fill="white">✦</text>
+</svg>

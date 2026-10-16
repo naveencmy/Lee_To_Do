@@ -1,0 +1,15 @@
+{
+  "watch": [
+    "dev-server.js",
+    "src",
+    ".dev.vars"
+  ],
+  "ext": "js,mjs,cjs,json,sql",
+  "ignore": [
+    "local.db*",
+    "*.db",
+    "node_modules",
+    ".wrangler"
+  ],
+  "delay": 200
+}
