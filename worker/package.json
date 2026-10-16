@@ -19,6 +19,6 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241205.0",
     "nodemon": "^3.1.14",
-    "wrangler": "^4.151.0"
+    "wrangler": "^3.114.17"
   }
 }
