@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon dev-server.js",
     "dev:cf": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "deploy:worker": "wrangler deploy"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",

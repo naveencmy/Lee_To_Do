@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "lee-todo-db"
-database_id = "YOUR_D1_DATABASE_ID"  # Replace after: npx wrangler d1 create lee-todo-db
+database_id = "73af9aaa-7064-4081-a9fa-ef2c95ba52d4"  
 
 # AI binding
 [ai]
