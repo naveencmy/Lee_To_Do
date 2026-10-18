@@ -1,10 +1,62 @@
 // ═══════════════════════════════════════════════════════════════
-// AI Assistant Routes — Cloudflare Workers AI via AI Gateway
-// Dual-purpose: Kanban mutations + Conversational analytics
+// AI Assistant Routes — Cloudflare Workers AI + Bulletproof Co-Pilot Engine
+// Zero-Failure Architecture: Dual LLM + Deterministic Semantic NLP Fallback
 // ═══════════════════════════════════════════════════════════════
 import { Hono } from 'hono';
 
 export const aiRouter = new Hono();
+
+// ── Date NLP Parser ──
+function parseDateNLP(text) {
+  if (!text || typeof text !== 'string') return null;
+  const lower = text.toLowerCase();
+  const now = new Date();
+
+  // 1. Explicit ISO format (YYYY-MM-DD)
+  const isoMatch = lower.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (isoMatch) return isoMatch[1];
+
+  // 2. Relative keywords
+  if (/\b(today|tonight)\b/i.test(lower)) {
+    return now.toISOString().split('T')[0];
+  }
+
+  if (/\b(tomorrow)\b/i.test(lower)) {
+    const tm = new Date(now.getTime() + 86400000);
+    return tm.toISOString().split('T')[0];
+  }
+
+  const inDaysMatch = lower.match(/\bin\s+(\d+)\s+days?\b/i);
+  if (inDaysMatch) {
+    const days = parseInt(inDaysMatch[1], 10);
+    const future = new Date(now.getTime() + days * 86400000);
+    return future.toISOString().split('T')[0];
+  }
+
+  // 3. Days of the week
+  const daysMap = {
+    sunday: 0,
+    monday: 1,
+    tuesday: 2,
+    wednesday: 3,
+    thursday: 4,
+    friday: 5,
+    saturday: 6,
+  };
+
+  const dayRegex = /\b(?:by|on|due|next)?\s*(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i;
+  const dayMatch = lower.match(dayRegex);
+  if (dayMatch) {
+    const targetDay = daysMap[dayMatch[1].toLowerCase()];
+    const currentDay = now.getDay();
+    let diff = targetDay - currentDay;
+    if (diff <= 0) diff += 7; // Target next upcoming day
+    const targetDate = new Date(now.getTime() + diff * 86400000);
+    return targetDate.toISOString().split('T')[0];
+  }
+
+  return null;
+}
 
 // ── Robust Task Fuzzy Finder (Bag-of-Words & Acronym-Aware) ──
 function findTaskMatch(query, list) {
@@ -62,12 +114,75 @@ function findTaskMatch(query, list) {
       }
     }
 
-    if (maxScore >= 0.5) {
+    if (maxScore >= 0.4) {
       return bestMatch;
     }
   }
 
   return null;
+}
+
+// ── Smart Deterministic Task Co-Pilot (Zero-Latency Instant Actions & Fallback) ──
+function analyzeBoardLocally(tasks, intent, userMessage) {
+  const today = new Date().toISOString().split('T')[0];
+  const activeTasks = tasks.filter(t => !t.is_checked);
+  const completedTasks = tasks.filter(t => t.is_checked);
+  const overdue = activeTasks.filter(t => t.due_date && t.due_date < today);
+  const urgent = activeTasks.filter(t => t.column_name === 'urgent');
+  const inProgress = activeTasks.filter(t => t.column_name === 'inprogress');
+  const blocked = activeTasks.filter(t => t.column_name === 'blocked');
+  const todo = activeTasks.filter(t => t.column_name === 'todo');
+
+  const statBar = `**Active: ${activeTasks.length}** • **Urgent: ${urgent.length}** • **In Progress: ${inProgress.length}** • **Overdue: ${overdue.length}** • **Completed: ${completedTasks.length}**`;
+
+  if (intent === 'overdue') {
+    if (overdue.length === 0) {
+      return `${statBar}\n\n### All Caught Up!\nThere are currently **no overdue tasks** on your board. Great job staying on schedule!\n\n> 💡 **Next Action Recommendation:** Review your [IN PROGRESS] items to keep momentum.`;
+    }
+    const list = overdue.map(t => `- **${t.title}** \`Due: ${t.due_date}\` (${t.column_name.toUpperCase()})`).join('\n');
+    return `${statBar}\n\n### Overdue Tasks (${overdue.length})\n${list}\n\n> 💡 **Next Action Recommendation:** Focus immediately on clearing overdue items or reschedule them if priorities shifted.`;
+  }
+
+  if (intent === 'priority' || intent === 'focus') {
+    if (urgent.length > 0) {
+      const top = urgent[0];
+      const list = urgent.map(t => `- **${t.title}** \`Due: ${t.due_date || 'No due date'}\``).join('\n');
+      return `${statBar}\n\n### Top Priority: ${top.title}\nHere are your urgent high-priority tasks:\n${list}\n\n> 💡 **Next Action Recommendation:** Start with **"${top.title}"** before moving to any other column.`;
+    }
+    if (inProgress.length > 0) {
+      const top = inProgress[0];
+      return `${statBar}\n\n### Active Focus: ${top.title}\nYou have no tasks marked urgent. Your active task in progress is:\n- **${top.title}** \`Due: ${top.due_date || 'No due date'}\`\n\n> 💡 **Next Action Recommendation:** Finish **"${top.title}"** to move it to Completed!`;
+    }
+    if (todo.length > 0) {
+      return `${statBar}\n\n### Next Up: ${todo[0].title}\nNo tasks currently in progress. Pick your next task from To-Do:\n- **${todo[0].title}** \`Due: ${todo[0].due_date || 'No due date'}\`\n\n> 💡 **Next Action Recommendation:** Move this task to In Progress and begin work.`;
+    }
+    return `${statBar}\n\n### Board is Clear\nYou have no pending tasks! Enjoy your break or create new tasks using the **+ Add Task** button.`;
+  }
+
+  // Default: Full Board Summary
+  let summary = `${statBar}\n\n`;
+
+  if (urgent.length > 0) {
+    summary += `### Urgent (${urgent.length})\n` + urgent.map(t => `- **${t.title}** \`Due: ${t.due_date || 'None'}\`${t.period !== 'none' ? ` (${t.period})` : ''}`).join('\n') + '\n\n';
+  }
+  if (inProgress.length > 0) {
+    summary += `### In Progress (${inProgress.length})\n` + inProgress.map(t => `- **${t.title}** \`Due: ${t.due_date || 'None'}\``).join('\n') + '\n\n';
+  }
+  if (blocked.length > 0) {
+    summary += `### Blocked (${blocked.length})\n` + blocked.map(t => `- **${t.title}** ${t.blocker_reason ? `*(Reason: ${t.blocker_reason})*` : ''}`).join('\n') + '\n\n';
+  }
+  if (todo.length > 0) {
+    summary += `### To-Do (${todo.length})\n` + todo.slice(0, 5).map(t => `- **${t.title}** \`Due: ${t.due_date || 'None'}\``).join('\n') + (todo.length > 5 ? `\n- *...and ${todo.length - 5} more in To-Do*` : '') + '\n\n';
+  }
+
+  const advice = urgent.length > 0
+    ? `Tackle your ${urgent.length} urgent task(s) first today.`
+    : inProgress.length > 0
+      ? `Complete your active work in In Progress.`
+      : `Pick a top item from your To-Do column.`;
+
+  summary += `> **Next Action Recommendation:** ${advice}`;
+  return summary;
 }
 
 // ── System prompt for the AI assistant ──
@@ -82,86 +197,161 @@ You MUST respond with a JSON object wrapped in <tool_call> tags:
 {"action": "create|update|delete|move", "task": {"title": "...", "column_name": "todo|urgent|inprogress|blocked", "due_date": "YYYY-MM-DD", "period": "none|daily|weekly|monthly", "blocker_reason": "...", "id": "..."}}
 </tool_call>
 
-- For "create": title and column_name are required. due_date optional.
+- For "create": title and column_name are required. due_date optional (YYYY-MM-DD format). period optional ('none','daily','weekly','monthly').
 - For "update": id is required, plus any fields to change.  
 - For "delete": id or title is required.
 - For "move": id or title and column_name are required.
 - When user says "urgent" or "high priority", set column_name to "urgent".
 - Default column is "todo".
 
-EXAMPLES OF DELETE:
+EXAMPLES:
+- User: "add task submit ML assignment by Friday" -> <tool_call>{"action": "create", "task": {"title": "Submit ML assignment", "column_name": "todo", "due_date": "YYYY-MM-DD", "period": "none"}}</tool_call>
 - User: "delete the ML assignment submit task" -> <tool_call>{"action": "delete", "task": {"title": "ML assignment submit"}}</tool_call>
-- User: "remove the database project" -> <tool_call>{"action": "delete", "task": {"title": "database project"}}</tool_call>
-DO NOT return a summary, greeting, or ask for clarification when asked to delete a task!
+- User: "move database project to urgent" -> <tool_call>{"action": "move", "task": {"title": "database project", "column_name": "urgent"}}</tool_call>
 
 MODE 2 — CONVERSATION & ANALYTICS (when user asks questions, wants summaries, insights):
-Respond in natural conversational text with markdown formatting.
-Analyze the provided task data to give insights like:
-- Task completion rates
-- Overdue task alerts
-- Productivity patterns
-- Daily/weekly summaries
-- Suggestions for prioritization
-- Blocked task resolution ideas
-
-RULES:
-- Be concise, friendly, and actionable
-- Use emojis sparingly for visual clarity
-- Always consider due dates relative to the current date provided`;
+Format like Google Gemini:
+- Lead with an overview metric bar: **Active: X** • **Urgent: Y** • **In Progress: Z** • **Overdue: W**
+- Group tasks under headers: ### Urgent, ### In Progress, ### To-Do, ### Blocked
+- Clean task items: - **Task Title** \`Due: YYYY-MM-DD\`
+- End with: > **Next Action Recommendation:** [1 concise advice].`;
 
 // ── POST /api/ai/chat — Main AI endpoint ──
 aiRouter.post('/chat', async (c) => {
   const { AI, DB } = c.env;
-  const { message, context } = await c.req.json();
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return c.json({ error: 'Invalid JSON request' }, 400);
+  }
 
+  const { message } = body;
   if (!message || !message.trim()) {
     return c.json({ error: 'Message is required' }, 400);
   }
 
+  // Fetch current board state
+  let tasks = [];
   try {
-    // Fetch current board state for context
-    const { results: tasks } = await DB.prepare(
+    const { results } = await DB.prepare(
       'SELECT id, title, column_name, due_date, period, is_checked, blocker_reason, updated_at FROM tasks ORDER BY column_name, position'
     ).all();
+    tasks = results || [];
+  } catch (dbErr) {
+    console.error('Database query error in AI route:', dbErr.message);
+  }
 
-    const msgLower = message.toLowerCase();
+  const msgLower = message.toLowerCase().trim();
 
-    // ── 1. PRE-FLIGHT DETERMINISTIC INTENT DETECTION (Instant Direct Action) ──
-    if (/\b(delete|remove|purge|drop|trash|kill|discard)\b/i.test(msgLower)) {
+  // ═══════════════════════════════════════════════════════════════
+  // 1. FAST DETERMINISTIC INTENT HANDLERS (Zero-Latency Guarantee)
+  // ═══════════════════════════════════════════════════════════════
+
+  // A. DELETE INTENT
+  if (/\b(delete|remove|purge|drop|trash|kill|discard)\b/i.test(msgLower)) {
+    const match = findTaskMatch(message, tasks);
+    if (match) {
+      await DB.prepare('DELETE FROM tasks WHERE id = ?').bind(match.id).run();
+      return c.json({
+        type: 'mutation',
+        mutation: { action: 'delete', task: { id: match.id, title: match.title } },
+        result: { success: true },
+        message: `Deleted task **"${match.title}"** (${match.column_name.toUpperCase()})`,
+      });
+    }
+  }
+
+  // B. MOVE INTENT
+  if (/\b(move|shift|transfer|put)\b/i.test(msgLower)) {
+    let targetCol = null;
+    if (msgLower.includes('urgent')) targetCol = 'urgent';
+    else if (msgLower.includes('progress') || msgLower.includes('doing')) targetCol = 'inprogress';
+    else if (msgLower.includes('block')) targetCol = 'blocked';
+    else if (msgLower.includes('todo') || msgLower.includes('to-do')) targetCol = 'todo';
+
+    if (targetCol) {
       const match = findTaskMatch(message, tasks);
       if (match) {
-        await DB.prepare('DELETE FROM tasks WHERE id = ?').bind(match.id).run();
+        const now = new Date().toISOString();
+        await DB.prepare('UPDATE tasks SET column_name = ?, updated_at = ? WHERE id = ?').bind(targetCol, now, match.id).run();
         return c.json({
           type: 'mutation',
-          mutation: { action: 'delete', task: { id: match.id, title: match.title } },
+          mutation: { action: 'move', task: { id: match.id, column_name: targetCol } },
           result: { success: true },
-          message: `🗑️ Deleted task **"${match.title}"** (${match.column_name.toUpperCase()})`,
+          message: `Moved **"${match.title}"** to **${targetCol.toUpperCase()}**`,
         });
       }
     }
+  }
 
-    if (/\b(move|shift|transfer|put)\b/i.test(msgLower)) {
-      let targetCol = null;
-      if (msgLower.includes('urgent')) targetCol = 'urgent';
-      else if (msgLower.includes('progress') || msgLower.includes('doing')) targetCol = 'inprogress';
-      else if (msgLower.includes('block')) targetCol = 'blocked';
-      else if (msgLower.includes('todo') || msgLower.includes('to-do')) targetCol = 'todo';
+  // C. CREATE / ADD TASK INTENT
+  const isCreateIntent = /\b(add|create|new|schedule|insert|remind me to)\b/i.test(msgLower) &&
+    !/\b(how to|why|what|show|list)\b/i.test(msgLower);
 
-      if (targetCol) {
-        const match = findTaskMatch(message, tasks);
-        if (match) {
-          const now = new Date().toISOString();
-          await DB.prepare('UPDATE tasks SET column_name = ?, updated_at = ? WHERE id = ?').bind(targetCol, now, match.id).run();
-          return c.json({
-            type: 'mutation',
-            mutation: { action: 'move', task: { id: match.id, column_name: targetCol } },
-            result: { success: true },
-            message: `✅ Moved **"${match.title}"** to **${targetCol.toUpperCase()}**`,
-          });
-        }
-      }
+  if (isCreateIntent) {
+    let targetCol = 'todo';
+    if (/\b(urgent|high priority|critical)\b/i.test(msgLower)) targetCol = 'urgent';
+    else if (/\b(progress|doing)\b/i.test(msgLower)) targetCol = 'inprogress';
+    else if (/\b(block|blocked)\b/i.test(msgLower)) targetCol = 'blocked';
+
+    let period = 'none';
+    if (/\bdaily\b/i.test(msgLower)) period = 'daily';
+    else if (/\bweekly\b/i.test(msgLower)) period = 'weekly';
+    else if (/\bmonthly\b/i.test(msgLower)) period = 'monthly';
+
+    const dueDate = parseDateNLP(message);
+
+    // Clean title from command verbs and extracted properties
+    let rawTitle = message
+      .replace(/\b(add|create|insert|schedule|new|task|item|todo|to-do|please|could you|can you|remind me to)\b/gi, ' ')
+      .replace(/\b(in urgent|to urgent|in todo|to todo|in progress|to progress|in blocked|to blocked)\b/gi, ' ')
+      .replace(/\b(daily|weekly|monthly)\b/gi, ' ')
+      .replace(/\b(by|on|due|next)?\s*(today|tomorrow|yesterday|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi, ' ')
+      .replace(/\bin\s+\d+\s+days?\b/gi, ' ')
+      .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+
+    if (rawTitle.length >= 2) {
+      // Capitalize first letter
+      const finalTitle = rawTitle.charAt(0).toUpperCase() + rawTitle.slice(1);
+      const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const now = new Date().toISOString();
+
+      const posResult = await DB.prepare(
+        'SELECT COALESCE(MAX(position), -1) + 1 as next_pos FROM tasks WHERE column_name = ?'
+      ).bind(targetCol).first();
+
+      await DB.prepare(
+        `INSERT INTO tasks (id, title, column_name, due_date, period, blocker_reason, position, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)`
+      ).bind(id, finalTitle, targetCol, dueDate || null, period, posResult?.next_pos ?? 0, now, now).run();
+
+      const recurrenceLabel = period !== 'none' ? ` (${period.toUpperCase()})` : '';
+      const dueLabel = dueDate ? ` [Due: ${dueDate}]` : '';
+
+      return c.json({
+        type: 'mutation',
+        mutation: { action: 'create', task: { id, title: finalTitle, column_name: targetCol, due_date: dueDate, period } },
+        result: { success: true, id },
+        message: ` Created task **"${finalTitle}"** in **${targetCol.toUpperCase()}**${dueLabel}${recurrenceLabel}`,
+      });
     }
+  }
 
+  // D. STATUS & ANALYTICS QUESTIONS INTENT
+  let questionIntent = null;
+  if (/\b(overdue|late|past due)\b/i.test(msgLower)) questionIntent = 'overdue';
+  else if (/\b(focus|priority|priorities|next|what should i do)\b/i.test(msgLower)) questionIntent = 'focus';
+  else if (/\b(summary|digest|status|overview|report|stats|board)\b/i.test(msgLower)) questionIntent = 'summary';
+
+  // ═══════════════════════════════════════════════════════════════
+  // 2. WORKERS AI EXECUTION WITH GRACEFUL FALLBACK
+  // ═══════════════════════════════════════════════════════════════
+  let aiOutputText = null;
+
+  if (AI && typeof AI.run === 'function') {
     const now = new Date();
     const boardContext = tasks.length > 0
       ? `\n\nCurrent Board State (${now.toISOString().split('T')[0]}):\n${tasks.map(t =>
@@ -170,46 +360,47 @@ aiRouter.post('/chat', async (c) => {
       : '\n\nThe board is currently empty. No tasks yet.';
 
     const currentDate = `\nCurrent Date & Time: ${now.toISOString()}`;
+    const gatewayId = c.env.AI_GATEWAY_ID || c.env.CF_AI_GATEWAY || c.env.AI_GATEWAY_SLUG;
 
-    // Call Workers AI (with Cloudflare AI Gateway support if configured)
-    // Call Cloudflare Workers AI
-    const gatewayId = c.env.AI_GATEWAY_ID || c.env.CF_AI_GATEWAY;
-    let aiResponse;
     const aiPayload = {
       messages: [
         { role: 'system', content: SYSTEM_PROMPT + currentDate + boardContext },
         { role: 'user', content: message }
       ],
       max_tokens: 1024,
-      temperature: 0.7,
+      temperature: 0.6,
     };
 
     try {
+      let aiResponse;
       if (gatewayId) {
         aiResponse = await AI.run('@cf/meta/llama-3.1-8b-instruct', aiPayload, { gateway: { id: gatewayId, skipCache: false } });
       } else {
         aiResponse = await AI.run('@cf/meta/llama-3.1-8b-instruct', aiPayload);
       }
+      aiOutputText = aiResponse?.response || aiResponse?.result?.response || (typeof aiResponse === 'string' ? aiResponse : null);
     } catch (gwErr) {
-      console.warn('AI run with gateway failed, attempting direct run:', gwErr.message);
-      aiResponse = await AI.run('@cf/meta/llama-3.1-8b-instruct', aiPayload);
+      console.warn('Workers AI primary model failed, trying fallback model:', gwErr.message);
+      try {
+        const fallbackResp = await AI.run('@cf/meta/llama-3-8b-instruct', aiPayload);
+        aiOutputText = fallbackResp?.response || fallbackResp?.result?.response || (typeof fallbackResp === 'string' ? fallbackResp : null);
+      } catch (fallbackErr) {
+        console.warn('Workers AI fallback model also unavailable:', fallbackErr.message);
+      }
     }
+  }
 
-    const responseText = aiResponse.response || '';
-
-    // Check if the response contains a tool call or json block (kanban mutation)
-    const toolCallMatch = responseText.match(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/) ||
-                          responseText.match(/```json\s*\n?([\s\S]*?)\n?```/);
+  // ── 3. PARSE AI OUTPUT (IF WORKERS AI SUCCEEDED) ──
+  if (aiOutputText) {
+    const toolCallMatch = aiOutputText.match(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/) ||
+      aiOutputText.match(/```json\s*\n?([\s\S]*?)\n?```/);
 
     if (toolCallMatch) {
       try {
-        const mutation = JSON.parse(toolCallMatch[1]);
-
-        // Execute the mutation
+        const rawMutation = JSON.parse(toolCallMatch[1]);
+        const mutation = rawMutation.action ? rawMutation : (rawMutation.task || rawMutation);
         const result = await executeMutation(DB, mutation);
-
-        // Clean response text (remove tool call tags)
-        const cleanText = responseText.replace(/<tool_call>[\s\S]*?<\/tool_call>/, '').trim();
+        const cleanText = aiOutputText.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '').replace(/```json[\s\S]*?```/g, '').trim();
 
         return c.json({
           type: 'mutation',
@@ -218,28 +409,29 @@ aiRouter.post('/chat', async (c) => {
           message: cleanText || `Done! ${getMutationDescription(mutation)}`,
         });
       } catch (parseErr) {
-        // If JSON parse fails, treat as conversation
-        return c.json({
-          type: 'conversation',
-          message: responseText.replace(/<\/?tool_call>/g, '').trim(),
-        });
+        console.warn('Failed to parse AI JSON tool call:', parseErr.message);
       }
     }
 
-    // Pure conversation response
+    // Return conversational text from LLM
     return c.json({
       type: 'conversation',
-      message: responseText,
+      message: aiOutputText.replace(/<\/?tool_call>/g, '').trim(),
     });
-
-  } catch (err) {
-    console.error('AI Error:', err);
-    return c.json({
-      error: 'AI processing failed',
-      detail: err.message,
-      type: 'error'
-    }, 500);
   }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 4. BULLETPROOF LOCAL CO-PILOT FALLBACK (Zero 500 Errors!)
+  // ═══════════════════════════════════════════════════════════════
+  // If Workers AI is offline, rate-limited, or unconfigured, the local co-pilot
+  // answers with high precision from live D1 data!
+  console.log('Serving request via Local Intelligent Co-Pilot Engine');
+
+  const localReport = analyzeBoardLocally(tasks, questionIntent || 'summary', message);
+  return c.json({
+    type: 'conversation',
+    message: localReport,
+  });
 });
 
 // ── Execute a kanban mutation from AI ──

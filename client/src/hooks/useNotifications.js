@@ -190,6 +190,17 @@ export function useNotifications() {
     }
   }, []);
 
+  // ── Trigger real scheduled notifications daemon on-demand ──
+  const triggerCronSchedule = useCallback(async () => {
+    try {
+      const result = await pushApi.triggerCronSchedule();
+      return result;
+    } catch (err) {
+      console.error('Trigger schedule failed:', err);
+      throw err;
+    }
+  }, []);
+
   // ── Fetch registered devices ──
   const fetchDevices = useCallback(async () => {
     try {
@@ -208,6 +219,7 @@ export function useNotifications() {
     subscribe,
     unsubscribe,
     testNotification,
+    triggerCronSchedule,
     showLocalNotification,
     fetchDevices,
   };

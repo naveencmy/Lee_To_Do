@@ -96,6 +96,15 @@ export default function Settings({ notifications, showToast, theme = 'dark', set
     }
   };
 
+  const handleTriggerSchedule = async () => {
+    try {
+      const result = await notifications.triggerCronSchedule();
+      showToast(`Schedule dispatched: ${result.notificationsDispatched || 0} notice(s) to ${result.devicesCount || 0} device(s)`);
+    } catch (err) {
+      showToast('Failed to dispatch scheduled notifications');
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: '80px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
@@ -148,10 +157,10 @@ export default function Settings({ notifications, showToast, theme = 'dark', set
           <div className="settings__item-info">
             <div className="settings__item-label">Desktop Alert Verification</div>
             <div className="settings__item-desc">
-              Verify native OS alerts in Windows Action Center / Browser
+              Verify native OS alerts in Windows Action Center / Browser & Daily/Weekly notice dispatch
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button
               className="btn btn--secondary"
               onClick={() => {
@@ -165,13 +174,23 @@ export default function Settings({ notifications, showToast, theme = 'dark', set
               Instant Test
             </button>
             {notifications.isSubscribed && (
-              <button
-                className="btn btn--secondary"
-                onClick={handleTestNotification}
-                style={{ fontSize: 'var(--font-size-xs)' }}
-              >
-                Server Push
-              </button>
+              <>
+                <button
+                  className="btn btn--secondary"
+                  onClick={handleTestNotification}
+                  style={{ fontSize: 'var(--font-size-xs)' }}
+                >
+                  Server Push
+                </button>
+                <button
+                  className="btn btn--primary"
+                  onClick={handleTriggerSchedule}
+                  style={{ fontSize: 'var(--font-size-xs)' }}
+                  title="Dispatch live daily briefing, weekly digest and overdue notices"
+                >
+                  Run Schedule Notice
+                </button>
+              </>
             )}
           </div>
         </div>

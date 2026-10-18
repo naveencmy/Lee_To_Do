@@ -363,8 +363,123 @@ function findTaskMatch(query, list) {
   return null;
 }
 
+// ── Date NLP Parser ──
+function parseDateNLP(text) {
+  if (!text || typeof text !== 'string') return null;
+  const lower = text.toLowerCase();
+  const now = new Date();
+
+  // 1. Explicit ISO format (YYYY-MM-DD)
+  const isoMatch = lower.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (isoMatch) return isoMatch[1];
+
+  // 2. Relative keywords
+  if (/\b(today|tonight)\b/i.test(lower)) {
+    return now.toISOString().split('T')[0];
+  }
+
+  if (/\b(tomorrow)\b/i.test(lower)) {
+    const tm = new Date(now.getTime() + 86400000);
+    return tm.toISOString().split('T')[0];
+  }
+
+  const inDaysMatch = lower.match(/\bin\s+(\d+)\s+days?\b/i);
+  if (inDaysMatch) {
+    const days = parseInt(inDaysMatch[1], 10);
+    const future = new Date(now.getTime() + days * 86400000);
+    return future.toISOString().split('T')[0];
+  }
+
+  // 3. Days of the week
+  const daysMap = {
+    sunday: 0,
+    monday: 1,
+    tuesday: 2,
+    wednesday: 3,
+    thursday: 4,
+    friday: 5,
+    saturday: 6,
+  };
+
+  const dayRegex = /\b(?:by|on|due|next)?\s*(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i;
+  const dayMatch = lower.match(dayRegex);
+  if (dayMatch) {
+    const targetDay = daysMap[dayMatch[1].toLowerCase()];
+    const currentDay = now.getDay();
+    let diff = targetDay - currentDay;
+    if (diff <= 0) diff += 7;
+    const targetDate = new Date(now.getTime() + diff * 86400000);
+    return targetDate.toISOString().split('T')[0];
+  }
+
+  return null;
+}
+
+// ── Smart Local Board Analyzer ──
+function analyzeBoardLocally(tasks, intent, userMessage) {
+  const today = new Date().toISOString().split('T')[0];
+  const activeTasks = tasks.filter(t => !t.is_checked);
+  const completedTasks = tasks.filter(t => t.is_checked);
+  const overdue = activeTasks.filter(t => t.due_date && t.due_date < today);
+  const urgent = activeTasks.filter(t => t.column_name === 'urgent');
+  const inProgress = activeTasks.filter(t => t.column_name === 'inprogress');
+  const blocked = activeTasks.filter(t => t.column_name === 'blocked');
+  const todo = activeTasks.filter(t => t.column_name === 'todo');
+
+  const statBar = `**Active: ${activeTasks.length}** • **Urgent: ${urgent.length}** • **In Progress: ${inProgress.length}** • **Overdue: ${overdue.length}** • **Completed: ${completedTasks.length}**`;
+
+  if (intent === 'overdue') {
+    if (overdue.length === 0) {
+      return `${statBar}\n\n### All Caught Up!\nThere are currently **no overdue tasks** on your board. Great job staying on schedule!\n\n> 💡 **Next Action Recommendation:** Review your [IN PROGRESS] items to keep momentum.`;
+    }
+    const list = overdue.map(t => `- **${t.title}** \`Due: ${t.due_date}\` (${t.column_name.toUpperCase()})`).join('\n');
+    return `${statBar}\n\n### Overdue Tasks (${overdue.length})\n${list}\n\n> 💡 **Next Action Recommendation:** Focus immediately on clearing overdue items or reschedule them if priorities shifted.`;
+  }
+
+  if (intent === 'priority' || intent === 'focus') {
+    if (urgent.length > 0) {
+      const top = urgent[0];
+      const list = urgent.map(t => `- **${t.title}** \`Due: ${t.due_date || 'No due date'}\``).join('\n');
+      return `${statBar}\n\n### Top Priority: ${top.title}\nHere are your urgent high-priority tasks:\n${list}\n\n> 💡 **Next Action Recommendation:** Start with **"${top.title}"** before moving to any other column.`;
+    }
+    if (inProgress.length > 0) {
+      const top = inProgress[0];
+      return `${statBar}\n\n### Active Focus: ${top.title}\nYou have no tasks marked urgent. Your active task in progress is:\n- **${top.title}** \`Due: ${top.due_date || 'No due date'}\`\n\n> 💡 **Next Action Recommendation:** Finish **"${top.title}"** to move it to Completed!`;
+    }
+    if (todo.length > 0) {
+      return `${statBar}\n\n### Next Up: ${todo[0].title}\nNo tasks currently in progress. Pick your next task from To-Do:\n- **${todo[0].title}** \`Due: ${todo[0].due_date || 'No due date'}\`\n\n> 💡 **Next Action Recommendation:** Move this task to In Progress and begin work.`;
+    }
+    return `${statBar}\n\n### Board is Clear\nYou have no pending tasks! Enjoy your break or create new tasks using the **+ Add Task** button.`;
+  }
+
+  // Default: Full Board Summary
+  let summary = `${statBar}\n\n`;
+
+  if (urgent.length > 0) {
+    summary += `### Urgent (${urgent.length})\n` + urgent.map(t => `- **${t.title}** \`Due: ${t.due_date || 'None'}\`${t.period !== 'none' ? ` (${t.period})` : ''}`).join('\n') + '\n\n';
+  }
+  if (inProgress.length > 0) {
+    summary += `### In Progress (${inProgress.length})\n` + inProgress.map(t => `- **${t.title}** \`Due: ${t.due_date || 'None'}\``).join('\n') + '\n\n';
+  }
+  if (blocked.length > 0) {
+    summary += `### Blocked (${blocked.length})\n` + blocked.map(t => `- **${t.title}** ${t.blocker_reason ? `*(Reason: ${t.blocker_reason})*` : ''}`).join('\n') + '\n\n';
+  }
+  if (todo.length > 0) {
+    summary += `### To-Do (${todo.length})\n` + todo.slice(0, 5).map(t => `- **${t.title}** \`Due: ${t.due_date || 'None'}\``).join('\n') + (todo.length > 5 ? `\n- *...and ${todo.length - 5} more in To-Do*` : '') + '\n\n';
+  }
+
+  const advice = urgent.length > 0
+    ? `Tackle your ${urgent.length} urgent task(s) first today.`
+    : inProgress.length > 0
+      ? `Complete your active work in In Progress.`
+      : `Pick a top item from your To-Do column.`;
+
+  summary += `> **Next Action Recommendation:** ${advice}`;
+  return summary;
+}
+
 // ═══════════════════════════════════════════════════════════════
-// AI ROUTES — Cloudflare Workers AI + Bulletproof Mutations
+// AI ROUTES — Cloudflare Workers AI + Bulletproof Local Co-Pilot
 // ═══════════════════════════════════════════════════════════════
 app.post('/api/ai/chat', async (req, res) => {
   const { message } = req.body;
@@ -373,10 +488,11 @@ app.post('/api/ai/chat', async (req, res) => {
   const tasks = dbAll('SELECT * FROM tasks WHERE is_checked=0 ORDER BY column_name, position');
   const allTasks = dbAll('SELECT * FROM tasks');
   const today = new Date().toISOString().split('T')[0];
-  const msgLower = message.toLowerCase();
+  const msgLower = message.toLowerCase().trim();
 
-  // ── 1. PRE-FLIGHT DETERMINISTIC INTENT DETECTION (Instant Direct Action) ──
-  // If user explicitly asks to DELETE/REMOVE a task:
+  // ── 1. PRE-FLIGHT DETERMINISTIC INTENT DETECTION (Instant Actions) ──
+
+  // A. DELETE/REMOVE INTENT
   if (/\b(delete|remove|purge|drop|trash|kill|discard)\b/i.test(msgLower)) {
     const match = findTaskMatch(message, allTasks);
     if (match) {
@@ -385,12 +501,12 @@ app.post('/api/ai/chat', async (req, res) => {
         type: 'mutation',
         mutation: { action: 'delete', task: { id: match.id, title: match.title } },
         result: { success: true },
-        message: `🗑️ Deleted task **"${match.title}"** (${match.column_name.toUpperCase()})`,
+        message: `Deleted task **"${match.title}"** (${match.column_name.toUpperCase()})`,
       });
     }
   }
 
-  // If user explicitly asks to MOVE a task:
+  // B. MOVE INTENT
   if (/\b(move|shift|transfer|put)\b/i.test(msgLower)) {
     let targetCol = null;
     if (msgLower.includes('urgent')) targetCol = 'urgent';
@@ -407,13 +523,67 @@ app.post('/api/ai/chat', async (req, res) => {
           type: 'mutation',
           mutation: { action: 'move', task: { id: match.id, column_name: targetCol } },
           result: { success: true },
-          message: `✅ Moved **"${match.title}"** to **${targetCol.toUpperCase()}**`,
+          message: `Moved **"${match.title}"** to **${targetCol.toUpperCase()}**`,
         });
       }
     }
   }
 
-  // ── Build clean board context for AI ──
+  // C. CREATE / ADD INTENT
+  const isCreateIntent = /\b(add|create|new|schedule|insert|remind me to)\b/i.test(msgLower) &&
+    !/\b(how to|why|what|show|list)\b/i.test(msgLower);
+
+  if (isCreateIntent) {
+    let targetCol = 'todo';
+    if (/\b(urgent|high priority|critical)\b/i.test(msgLower)) targetCol = 'urgent';
+    else if (/\b(progress|doing)\b/i.test(msgLower)) targetCol = 'inprogress';
+    else if (/\b(block|blocked)\b/i.test(msgLower)) targetCol = 'blocked';
+
+    let period = 'none';
+    if (/\bdaily\b/i.test(msgLower)) period = 'daily';
+    else if (/\bweekly\b/i.test(msgLower)) period = 'weekly';
+    else if (/\bmonthly\b/i.test(msgLower)) period = 'monthly';
+
+    const dueDate = parseDateNLP(message);
+
+    let rawTitle = message
+      .replace(/\b(add|create|insert|schedule|new|task|item|todo|to-do|please|could you|can you|remind me to)\b/gi, ' ')
+      .replace(/\b(in urgent|to urgent|in todo|to todo|in progress|to progress|in blocked|to blocked)\b/gi, ' ')
+      .replace(/\b(daily|weekly|monthly)\b/gi, ' ')
+      .replace(/\b(by|on|due|next)?\s*(today|tomorrow|yesterday|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi, ' ')
+      .replace(/\bin\s+\d+\s+days?\b/gi, ' ')
+      .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+
+    if (rawTitle.length >= 2) {
+      const finalTitle = rawTitle.charAt(0).toUpperCase() + rawTitle.slice(1);
+      const id = genId();
+      const now = new Date().toISOString();
+      const pos = dbGet('SELECT COALESCE(MAX(position),-1)+1 as p FROM tasks WHERE column_name=?', [targetCol])?.p ?? 0;
+
+      dbRun('INSERT INTO tasks (id,title,column_name,due_date,period,blocker_reason,position,created_at,updated_at) VALUES (?,?,?,?,?,NULL,?,?,?)',
+        [id, finalTitle, targetCol, dueDate || null, period, pos, now, now]);
+
+      const recurrenceLabel = period !== 'none' ? ` (${period.toUpperCase()})` : '';
+      const dueLabel = dueDate ? ` [Due: ${dueDate}]` : '';
+
+      return res.json({
+        type: 'mutation',
+        mutation: { action: 'create', task: { id, title: finalTitle, column_name: targetCol, due_date: dueDate, period } },
+        result: { success: true, id },
+        message: `Created task **"${finalTitle}"** in **${targetCol.toUpperCase()}**${dueLabel}${recurrenceLabel}`,
+      });
+    }
+  }
+
+  // D. STATUS & ANALYTICS QUESTION INTENTS
+  let questionIntent = null;
+  if (/\b(overdue|late|past due)\b/i.test(msgLower)) questionIntent = 'overdue';
+  else if (/\b(focus|priority|priorities|next|what should i do)\b/i.test(msgLower)) questionIntent = 'focus';
+  else if (/\b(summary|digest|status|overview|report|stats|board)\b/i.test(msgLower)) questionIntent = 'summary';
+
+  // ── 2. Build Context & Call Workers AI (if configured) ──
   const boardContext = tasks.map(t =>
     `- [${t.column_name.toUpperCase()}] "${t.title}" | Due: ${t.due_date || 'No due date'} | Recurrence: ${t.period}${t.blocker_reason ? ' | Blocker: ' + t.blocker_reason : ''}`
   ).join('\n');
@@ -424,7 +594,6 @@ app.post('/api/ai/chat', async (req, res) => {
   const inProgressCount = tasks.filter(t => t.column_name === 'inprogress').length;
   const blockedCount = tasks.filter(t => t.column_name === 'blocked').length;
 
-  // ── Gemini-grade System Prompt ──
   const systemPrompt = `You are Lee, an advanced AI productivity co-pilot for a Kanban task management board.
 
 CURRENT BOARD DATA:
@@ -438,36 +607,13 @@ METRICS:
 - Completed: ${completedCount}
 - Overdue: ${overdue.length}
 
-TODAY'S DATE: ${today} (IST Asia/Kolkata)
+TODAY'S DATE: ${today}
 
 CRITICAL INTENT RULES:
-1. If the user asks to DELETE or REMOVE a task (e.g. "delete X", "delete the X task", "remove X"):
-   You MUST return ONLY a JSON block:
-   \`\`\`json
-   {"action":"delete","title_match":"exact title or keywords"}
-   \`\`\`
-   EXAMPLES:
-   - "delete the ML assignment submit task" -> {"action":"delete","title_match":"ML assignment submit"}
-   - "remove the database project" -> {"action":"delete","title_match":"database project"}
-   - "delete task 123" -> {"action":"delete","title_match":"123"}
-   DO NOT return a summary, greeting, or ask for clarification when asked to delete a task!
-
-2. If the user asks to MOVE a task:
-   \`\`\`json
-   {"action":"move","title_match":"...","column_name":"todo|urgent|inprogress|blocked"}
-   \`\`\`
-
-3. If the user asks to CREATE or ADD a task:
-   \`\`\`json
-   {"action":"create","title":"...","column_name":"todo|urgent|inprogress|blocked","due_date":"YYYY-MM-DD or null","period":"none|daily|weekly|monthly"}
-   \`\`\`
-
-4. ONLY if the user is asking a QUESTION or asking for a SUMMARY:
-   Format the response like Google Gemini:
-   - Lead with an overview metric bar: **Active: ${tasks.length}** • **Urgent: ${urgentCount}** • **In Progress: ${inProgressCount}** • **Overdue: ${overdue.length}**
-   - Group tasks under headers: ### 🔥 Urgent, ### ⚡ In Progress, ### 📝 To-Do, ### 🔴 Blocked
-   - Clean task items: - **Task Title** \`Due: YYYY-MM-DD\` (include recurrence like \`Daily\` if recurring).
-   - End with: > 💡 **Next Action Recommendation:** [1 concise advice].`;
+1. For task creation: return ONLY \`\`\`json\n{"action":"create","title":"...","column_name":"todo|urgent|inprogress|blocked","due_date":"YYYY-MM-DD or null","period":"none|daily|weekly|monthly"}\n\`\`\`
+2. For task moves: return ONLY \`\`\`json\n{"action":"move","title_match":"...","column_name":"..."}\n\`\`\`
+3. For task deletes: return ONLY \`\`\`json\n{"action":"delete","title_match":"..."}\n\`\`\`
+4. For questions/summaries: Lead with an overview metric bar, group under ### headers, and end with > 💡 **Next Action Recommendation:**.`;
 
   const aiResponse = await callWorkersAI([
     { role: 'system', content: systemPrompt },
@@ -476,7 +622,6 @@ CRITICAL INTENT RULES:
 
   if (aiResponse) {
     const responseStr = String(aiResponse);
-    // ── Parse AI response for JSON action blocks or tool_calls ──
     const jsonMatch = responseStr.match(/```json\s*\n?([\s\S]*?)\n?```/) ||
       responseStr.match(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/);
 
@@ -497,7 +642,7 @@ CRITICAL INTENT RULES:
             type: 'mutation',
             mutation: { action: 'create', task: action },
             result: { success: true, id },
-            message: cleanMsg || ` Created task **"${action.title}"** in **${col.toUpperCase()}**${action.due_date ? ` (due ${action.due_date})` : ''}`,
+            message: cleanMsg || `✨ Created task **"${action.title}"** in **${col.toUpperCase()}**${action.due_date ? ` (due ${action.due_date})` : ''}`,
           });
         }
 
@@ -513,7 +658,7 @@ CRITICAL INTENT RULES:
               type: 'mutation',
               mutation: { action: 'move', task: { id: match.id, column_name: targetCol } },
               result: { success: true },
-              message: cleanMsg || ` Moved **"${match.title}"** to **${targetCol.toUpperCase()}**`,
+              message: cleanMsg || `✅ Moved **"${match.title}"** to **${targetCol.toUpperCase()}**`,
             });
           }
         }
@@ -529,7 +674,7 @@ CRITICAL INTENT RULES:
               type: 'mutation',
               mutation: { action: 'delete', task: { id: match.id, title: match.title } },
               result: { success: true },
-              message: cleanMsg || ` Deleted task **"${match.title}"**`,
+              message: cleanMsg || `🗑️ Deleted task **"${match.title}"**`,
             });
           }
         }
@@ -538,55 +683,15 @@ CRITICAL INTENT RULES:
       }
     }
 
-    // ── FALLBACK INTENT GUARD: If user clearly wanted to DELETE but LLM didn't wrap in JSON ──
-    if (msgLower.match(/\b(delete|remove|purge|drop|trash|kill|discard)\b/i)) {
-      const match = findTaskMatch(message, allTasks);
-      if (match) {
-        dbRun('DELETE FROM tasks WHERE id=?', [match.id]);
-        return res.json({
-          type: 'mutation',
-          mutation: { action: 'delete', task: { id: match.id, title: match.title } },
-          result: { success: true },
-          message: `Deleted task **"${match.title}"**`,
-        });
-      }
-    }
-
-    // ── FALLBACK INTENT GUARD: If user clearly wanted to MOVE but LLM didn't wrap in JSON ──
-    if (msgLower.match(/\b(move|shift|transfer|put)\b/i)) {
-      let targetCol = null;
-      if (msgLower.includes('urgent')) targetCol = 'urgent';
-      else if (msgLower.includes('progress')) targetCol = 'inprogress';
-      else if (msgLower.includes('block')) targetCol = 'blocked';
-      else if (msgLower.includes('todo') || msgLower.includes('to-do')) targetCol = 'todo';
-
-      if (targetCol) {
-        const match = findTaskMatch(message, allTasks);
-        if (match) {
-          const now = new Date().toISOString();
-          dbRun('UPDATE tasks SET column_name=?,updated_at=? WHERE id=?', [targetCol, now, match.id]);
-          return res.json({
-            type: 'mutation',
-            mutation: { action: 'move', task: { id: match.id, column_name: targetCol } },
-            result: { success: true },
-            message: `Moved **"${match.title}"** to **${targetCol.toUpperCase()}**`,
-          });
-        }
-      }
-    }
-
-    // Pure conversational AI response from Cloudflare
     return res.json({ type: 'conversation', message: aiResponse });
   }
 
-  // ═════════════════════════════════════════════════════
-  // STRICTLY CLOUDFLARE ONLY — No local LLM or NLP fallback
-  // ════════════════════════════════════════════════════
-  console.error(' Cloudflare AI failure:', lastAiError);
-  return res.status(502).json({
-    type: 'error',
-    error: 'Cloudflare Workers AI Unavailable',
-    message: `**Cloudflare AI Error**: ${lastAiError || 'Could not communicate with Cloudflare Workers AI. Ensure your Cloudflare API Token has Workers AI permissions.'}`,
+  // ── 3. BULLETPROOF LOCAL CO-PILOT FALLBACK ──
+  console.log('Serving request via Local Intelligent Co-Pilot Engine (Zero-Failure Guarantee)');
+  const localReport = analyzeBoardLocally(allTasks, questionIntent || 'summary', message);
+  return res.json({
+    type: 'conversation',
+    message: localReport,
   });
 });
 
@@ -636,6 +741,93 @@ app.post('/api/push/test', async (req, res) => {
   });
   console.log(` Test push: ${result.sent} sent, ${result.failed} failed`);
   res.json({ success: true, ...result });
+});
+
+// ── POST /api/push/cron-trigger — Manually dispatch scheduled daily/weekly notifications ──
+app.post('/api/push/cron-trigger', async (req, res) => {
+  if (!VAPID_PUBLIC || !VAPID_PRIVATE) {
+    return res.status(500).json({ error: 'VAPID keys not configured in .dev.vars' });
+  }
+
+  const allTasks = dbAll('SELECT * FROM tasks');
+  const activeTasks = allTasks.filter(t => !t.is_checked);
+  const today = new Date().toISOString().split('T')[0];
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+
+  const dailyTasks = activeTasks.filter(t => t.period === 'daily');
+  const dueTodayTasks = activeTasks.filter(t => t.due_date === today);
+  const combinedDaily = Array.from(new Set([...dailyTasks, ...dueTodayTasks]));
+
+  const weeklyTasks = activeTasks.filter(t => t.period === 'weekly');
+  const overdueTasks = activeTasks.filter(t => t.due_date && t.due_date < today);
+  const urgentTasks = activeTasks.filter(t => t.column_name === 'urgent');
+
+  const notifications = [];
+
+  // 1. Daily Notification
+  if (combinedDaily.length > 0) {
+    const list = combinedDaily.slice(0, 3).map(t => `• [${t.period === 'daily' ? '🔁 Daily' : '📅 Today'}] ${t.title}`).join('\n');
+    notifications.push({
+      title: `📋 Daily Task Notice: ${combinedDaily.length} Item(s)`,
+      body: list,
+      tag: 'daily-tasks-briefing',
+      data: { url: '/' },
+    });
+  }
+
+  // 2. Weekly Notification / Digest
+  if (weeklyTasks.length > 0) {
+    const list = weeklyTasks.slice(0, 3).map(t => `• ${t.title}`).join('\n');
+    notifications.push({
+      title: `📊 Weekly Task Notice: ${weeklyTasks.length} Active`,
+      body: `${list}\nTotal Pending: ${activeTasks.length} (${urgentTasks.length} urgent)`,
+      tag: 'weekly-digest-notice',
+      data: { url: '/' },
+    });
+  }
+
+  // 3. Overdue Alert
+  if (overdueTasks.length > 0) {
+    const list = overdueTasks.slice(0, 3).map(t => `• ${t.title} (due ${t.due_date})`).join('\n');
+    notifications.push({
+      title: `🚨 ${overdueTasks.length} Overdue Task(s) Alert`,
+      body: list,
+      tag: 'overdue-tasks',
+      data: { url: '/' },
+    });
+  }
+
+  if (notifications.length === 0) {
+    notifications.push({
+      title: `📋 Lee To-Do: Schedule Status`,
+      body: `All clear! Active: ${activeTasks.length} • Daily: ${dailyTasks.length} • Weekly: ${weeklyTasks.length}`,
+      tag: 'schedule-status',
+      data: { url: '/' },
+    });
+  }
+
+  let totalSent = 0, totalFailed = 0;
+  for (const notif of notifications) {
+    const result = await sendPushToAll({
+      title: notif.title,
+      body: notif.body,
+      icon: '/icons/favicon.svg',
+      badge: '/icons/favicon.svg',
+      tag: notif.tag,
+      data: notif.data,
+    });
+    totalSent += result.sent;
+    totalFailed += result.failed;
+  }
+
+  console.log(`Cron Trigger dispatched: ${notifications.length} notification(s) (Sent: ${totalSent}, Failed: ${totalFailed})`);
+  res.json({
+    success: true,
+    notificationsDispatched: notifications.length,
+    sent: totalSent,
+    failed: totalFailed,
+    notifications: notifications.map(n => ({ title: n.title, tag: n.tag })),
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════

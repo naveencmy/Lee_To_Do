@@ -51,6 +51,7 @@ export const pushApi = {
     request('/api/push/unsubscribe', { method: 'DELETE', body: { endpoint } }),
   listSubscriptions: () => request('/api/push/subscriptions'),
   testNotification: () => request('/api/push/test', { method: 'POST' }),
+  triggerCronSchedule: () => request('/api/push/cron-trigger', { method: 'POST' }),
 };
 
 // ── Settings API ──

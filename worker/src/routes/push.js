@@ -117,6 +117,17 @@ pushRouter.post('/test', async (c) => {
   }
 });
 
+// ── POST /api/push/cron-trigger — Manually dispatch scheduled daily/weekly notifications ──
+pushRouter.post('/cron-trigger', async (c) => {
+  try {
+    const { handleCronNotifications } = await import('../cron/notifier.js');
+    const result = await handleCronNotifications(c.env, { force: true });
+    return c.json(result);
+  } catch (err) {
+    return c.json({ error: 'Failed to dispatch cron notifications', detail: err.message }, 500);
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════
 // Web Push implementation using Web Crypto API (Workers-compatible)
 // Implements RFC 8291 (Web Push) + RFC 8292 (VAPID)
